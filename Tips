@@ -1,0 +1,44 @@
+# Gym Tracker — Deployment & Start Date Notes
+
+## Deploy to GitHub Pages
+
+1. Go to your repo: https://github.com/JayeshLocharla/gym-tracker
+2. Click **Settings** (top nav of the repo)
+3. In the left sidebar, click **Pages**
+4. Under **Build and deployment → Source**, select **Deploy from a branch**
+5. Under **Branch**, set:
+   - **Branch:** `claude/personal-transformation-app-pabo2h` (or `main`, once PR #1 is merged)
+   - **Folder:** `/docs`
+6. Click **Save**
+7. Wait 1–2 minutes, then refresh the Pages settings page. It will show a URL like:
+   `https://jayeshlocharla.github.io/gym-tracker/`
+
+### Notes
+- Using the feature branch now lets you test before merging the PR. Once PR #1 is merged into `main`, switch the branch dropdown to `main` (folder stays `/docs`).
+- First load might 404 for a minute while GitHub builds the site — just wait and refresh.
+- The `.nojekyll` file in `docs/` stops GitHub from running Jekyll processing, which could otherwise mangle the `js/` folder.
+- Once live, opening the URL will land on the **Set up** screen asking for the Apps Script URL and token — that's the backend half (`apps-script/README.md`), set up separately in Google Sheets.
+
+---
+
+## When Does the First Day Count?
+
+The first time the app successfully connects to your Sheet (right after entering the URL and token on the setup screen), it checks the **Config** tab's `startDate` field. That field ships blank, so on the first bootstrap call, `apps-script/Code.gs` runs:
+
+```js
+if (!cfg.startDate) {
+  var monday = fmtDate_(mondayOf_(new Date()));   // Monday of the current week
+  writeConfig_('startDate', monday);
+  cfg.startDate = monday;
+}
+```
+
+**Key takeaway:** Week 1 starts on the **Monday of the week you first connect** — not necessarily the exact day you tap Connect. (E.g., connecting on a Thursday still sets week 1 to start that Monday, making Thursday day 4 of week 1, not day 1.)
+
+### Check or Change It
+
+- **Check it:** Open your Google Sheet → **Config** tab → the `startDate` row shows the date.
+- **Change it:** Edit that cell directly in the Sheet (e.g., push it to next Monday for a clean start), then **bump the `planVersion` cell by 1** so your phone drops its cached copy and re-reads the config.
+
+### Possible Future Addition
+A "when did I start / change start date" control could be added to the **Plan → Settings** screen, instead of editing the Sheet by hand.
