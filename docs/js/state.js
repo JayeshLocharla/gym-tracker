@@ -109,16 +109,43 @@ export function doneMap() {
   return map;
 }
 
+/** Replace (or add) the session row for one exercise, in place. */
+function patchSession(exerciseId, dayCode, variant, done) {
+  if (!state.day) return;
+  const sessions = state.day.sessions.filter((s) => s.exerciseId !== exerciseId);
+  sessions.push({ exerciseId, dayCode, variant, done, date: state.date });
+  state.day = { ...state.day, sessions };
+}
+
+/**
+ * A tick or an equipment swap must feel instant — the Sheet write behind it can
+ * take a couple of seconds on Apps Script, and neither action needs confirming
+ * before it is safe to show. The local row is patched synchronously, before the
+ * first `await` below, so a caller that doesn't await this call already sees the
+ * new state by the time it returns. There is also no re-fetch of the whole day
+ * afterwards: a toggle only ever changes this one row, and we already know what
+ * we wrote, so re-fetching it would just be a second round trip for the same
+ * answer. On failure the previous row is restored and the error re-thrown.
+ */
 export async function toggleExercise(ex, done, variant) {
-  await call('toggleExercise', {
-    date: state.date,
-    dayCode: ex.day,
-    exerciseId: ex.id,
-    variant: variant || 1,
-    done,
-    weight: ex.weight
-  });
-  await loadDay(state.date);
+  const v = variant || 1;
+  const prev = state.day?.sessions.find((s) => s.exerciseId === ex.id) || null;
+  patchSession(ex.id, ex.day, v, done);
+
+  try {
+    await call('toggleExercise', {
+      date: state.date,
+      dayCode: ex.day,
+      exerciseId: ex.id,
+      variant: v,
+      done,
+      weight: ex.weight
+    });
+  } catch (err) {
+    if (prev) patchSession(prev.exerciseId, prev.dayCode, prev.variant, prev.done);
+    else if (state.day) state.day = { ...state.day, sessions: state.day.sessions.filter((s) => s.exerciseId !== ex.id) };
+    throw err;
+  }
 }
 
 /* ---- nutrition ----------------------------------------------------------- */

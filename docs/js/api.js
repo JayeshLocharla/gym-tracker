@@ -40,7 +40,17 @@ export class ApiError extends Error {
   }
 }
 
-/** One request. Retries twice on a network blip — phones drop packets in gyms. */
+/**
+ * One request. Retries twice on a network blip — phones drop packets in gyms.
+ *
+ * Only a transport-level failure retries: the fetch itself throwing, or a
+ * non-2xx HTTP status. A response the server actually sent back — success or a
+ * well-formed `{ ok: false, error }` rejection — is final immediately. Retrying
+ * a rejection (a duplicate food name, a bad token) just repeats the same
+ * question and gets the same answer three times, and used to bury the real
+ * message under a generic "could not reach the server" after a pointless
+ * 1.2-second wait. Only genuinely transient failures belong on the retry path.
+ */
 export async function call(action, params = {}, { retries = 2 } = {}) {
   if (!creds.configured) throw new ApiError('Not set up yet', 'SETUP');
 
@@ -48,46 +58,51 @@ export async function call(action, params = {}, { retries = 2 } = {}) {
   let lastErr;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    let res;
     try {
-      const res = await fetch(creds.url, {
+      res = await fetch(creds.url, {
         method: 'POST',
         // Deliberately text/plain — see the note at the top of this file.
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: payload,
         redirect: 'follow'
       });
-
-      if (!res.ok) throw new ApiError(`Server returned ${res.status}`, 'HTTP');
-
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        // Apps Script serves an HTML login page when the deployment is set to
-        // anything other than "Anyone" — worth naming, it is a common misstep.
-        if (text.includes('<html') || text.includes('accounts.google.com')) {
-          throw new ApiError(
-            'Got a Google sign-in page instead of data. Re-deploy the web app with "Who has access: Anyone".',
-            'DEPLOY'
-          );
-        }
-        throw new ApiError('Server sent something that was not JSON', 'PARSE');
-      }
-
-      if (data.ok === false) {
-        throw new ApiError(
-          data.code === 'AUTH' ? 'That token was rejected. Check it in Settings.' : (data.error || 'Request failed'),
-          data.code || 'APP'
-        );
-      }
-      return data;
     } catch (err) {
       lastErr = err;
-      // A rejected token or a bad deployment will not fix itself on a retry.
-      if (err instanceof ApiError && ['AUTH', 'DEPLOY', 'SETUP', 'PARSE'].includes(err.code)) throw err;
-      if (attempt < retries) await sleep(400 * Math.pow(2, attempt));
+      if (attempt < retries) { await sleep(400 * Math.pow(2, attempt)); continue; }
+      break;
     }
+
+    if (!res.ok) {
+      lastErr = new ApiError(`Server returned ${res.status}`, 'HTTP');
+      if (attempt < retries) { await sleep(400 * Math.pow(2, attempt)); continue; }
+      break;
+    }
+
+    // The server answered — everything from here is final, never retried.
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Apps Script serves an HTML login page when the deployment is set to
+      // anything other than "Anyone" — worth naming, it is a common misstep.
+      if (text.includes('<html') || text.includes('accounts.google.com')) {
+        throw new ApiError(
+          'Got a Google sign-in page instead of data. Re-deploy the web app with "Who has access: Anyone".',
+          'DEPLOY'
+        );
+      }
+      throw new ApiError('Server sent something that was not JSON', 'PARSE');
+    }
+
+    if (data.ok === false) {
+      throw new ApiError(
+        data.code === 'AUTH' ? 'That token was rejected. Check it in Settings.' : (data.error || 'Request failed'),
+        data.code || 'APP'
+      );
+    }
+    return data;
   }
   throw new ApiError(
     'Could not reach the server. Check your connection and try again.',

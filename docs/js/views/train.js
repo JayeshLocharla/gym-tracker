@@ -176,36 +176,36 @@ export function bindTrain(root, rerender) {
     });
   });
 
+  // toggleExercise (state.js) patches its local row before its first await, so
+  // calling rerender() right after invoking it — not after it resolves — already
+  // shows the new state. The Sheet write finishes in the background; .catch()
+  // reverts and re-renders only if that write actually fails.
   root.querySelectorAll('[data-toggle]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const id = btn.dataset.toggle;
       const ex = state.plan.exercises.find((e) => e.id === id);
       const current = doneMap()[id];
       const next = !(current?.done === true);
 
-      // Paint immediately — a tick that waits on a round trip feels broken.
-      btn.setAttribute('aria-checked', String(next));
-      try {
-        await toggleExercise(ex, next, current?.variant || 1);
-        rerender();
-      } catch (err) {
-        btn.setAttribute('aria-checked', String(!next));
+      toggleExercise(ex, next, current?.variant || 1).catch((err) => {
         toast(err.message);
-      }
+        rerender();
+      });
+      rerender();
     });
   });
 
   root.querySelectorAll('[data-variant]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const [id, v] = btn.dataset.variant.split(':');
       const ex = state.plan.exercises.find((e) => e.id === id);
       const current = doneMap()[id];
-      try {
-        await toggleExercise(ex, current?.done === true, Number(v));
-        rerender();
-      } catch (err) {
+
+      toggleExercise(ex, current?.done === true, Number(v)).catch((err) => {
         toast(err.message);
-      }
+        rerender();
+      });
+      rerender();
     });
   });
 }
